@@ -1,15 +1,17 @@
 import random
 import time
 import uuid
+import json
 from datetime import datetime, timezone
 from faker import Faker
+from confluent_kafka import Producer
 
 fake = Faker()
 
 STATUS_FLOW = ['placed', 'paid', 'shipped', 'delivered']
 PRODUCTS = ['sku-1001', 'sku-1002', 'sku-1003', 'sku-1004', 'sku-1005']
 
-open_orders = {}  # order_id -> current status index
+open_orders = {}
 
 def create_new_order():
     order_id = str(uuid.uuid4())
@@ -27,7 +29,6 @@ def advance_existing_order():
     order_id = random.choice(list(open_orders.keys()))
     current_index = open_orders[order_id]
 
-    # 10% chance an in-progress order gets cancelled instead of advancing
     if random.random() < 0.1:
         del open_orders[order_id]
         status = 'cancelled'
@@ -35,7 +36,7 @@ def advance_existing_order():
         next_index = current_index + 1
         status = STATUS_FLOW[next_index]
         if next_index == len(STATUS_FLOW) - 1:
-            del open_orders[order_id]  # delivered = order lifecycle complete
+            del open_orders[order_id]
         else:
             open_orders[order_id] = next_index
 
@@ -46,14 +47,30 @@ def advance_existing_order():
     }
 
 def generate_order_event():
-    # 40% chance of a new order, 60% chance of advancing an existing one (if any exist)
     if not open_orders or random.random() < 0.4:
         return create_new_order()
     else:
         return advance_existing_order()
 
+def delivery_report(err, msg):
+    if err is not None:
+        print(f"Delivery failed: {err}")
+    else:
+        print(f"Sent to {msg.topic()} [partition {msg.partition()}] key={msg.key()}")
+
 if __name__ == '__main__':
+    conf = {'bootstrap.servers': 'localhost:9093'}
+    producer = Producer(conf)
+
     for _ in range(15):
         event = generate_order_event()
-        print(event)
+        producer.produce(
+            'order-events',
+            key=event['order_id'],
+            value=json.dumps(event),
+            callback=delivery_report
+        )
+        producer.poll(0)
         time.sleep(1)
+
+    producer.flush()
