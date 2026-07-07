@@ -19,9 +19,9 @@ spark = SparkSession.builder \
 
 spark.sparkContext.setLogLevel("WARN")
 
-df = spark.table("local.bronze.clickstream_events")
+df = spark.table("local.bronze.order_events")
 print(f"Total rows: {df.count()}")
 df.show(20, truncate=False)
 
 print("\nSnapshot history:")
-spark.sql("SELECT * FROM local.bronze.clickstream_events.snapshots").show(truncate=False)
+spark.sql("SELECT * FROM local.bronze.order_events.snapshots").show(truncate=False)
