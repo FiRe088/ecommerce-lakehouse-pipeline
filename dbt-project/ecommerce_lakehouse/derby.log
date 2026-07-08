@@ -1,6 +1,6 @@
 ----------------------------------------------------------------
-Wed Jul 08 17:08:34 IST 2026:
-Booting Derby version The Apache Software Foundation - Apache Derby - 10.14.2.0 - (1828579): instance a816c00e-019f-4185-c6ab-00000581c180 
+Wed Jul 08 17:20:04 IST 2026:
+Booting Derby version The Apache Software Foundation - Apache Derby - 10.14.2.0 - (1828579): instance a816c00e-019f-4190-4eff-000003f3ba00 
 on database directory C:\Users\FiRe\Projects\ecommerce-lakehouse-pipeline\dbt-project\ecommerce_lakehouse\metastore_db with class loader jdk.internal.loader.ClassLoaders$AppClassLoader@73d16e93 
 Loaded from file:/C:/Users/FiRe/Projects/ecommerce-lakehouse-pipeline/spark-jobs/venv/Lib/site-packages/pyspark/jars/derby-10.14.2.0.jar
 java.vendor=Eclipse Adoptium

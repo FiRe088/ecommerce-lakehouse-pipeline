@@ -1,0 +1,24 @@
+version: 2
+
+models:
+  - name: stg_clickstream
+    columns:
+      - name: user_id
+        tests:
+          - not_null
+      - name: session_id
+        tests:
+          - not_null
+
+  - name: stg_orders
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+          - unique
+      - name: current_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['placed', 'paid', 'shipped', 'delivered', 'cancelled']
