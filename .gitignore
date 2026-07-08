@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 .terraform/
 *.tfstate
+dbt-project/logs/
