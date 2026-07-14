@@ -5,6 +5,7 @@ __pycache__/
 .DS_Store
 .terraform/
 *.tfstate
+*.tfstate.backup
 dbt-project/logs/
 dbt-project/ecommerce_lakehouse/derby.log
 dbt-project/ecommerce_lakehouse/metastore_db/
