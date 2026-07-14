@@ -126,10 +126,65 @@ This document is a running log of real problems hit while building the ecommerce
 
 ---
 
-## Status: Fully working, containerized Airflow to dbt to Iceberg pipeline
+## 9. Kubernetes: Confluent image rejects Kubernetes auto-injected KAFKA_PORT variable
 
-Bronze tables rebuilt natively under /opt/iceberg-warehouse, malformed legacy Kafka message filtered, all 8 dbt tests passing inside the Airflow container. The dbt_ecommerce_pipeline DAG runs dbt run then dbt test successfully end-to-end via docker exec-triggered manual runs; next step is enabling the @daily schedule for real unattended execution.
+**Symptom:** kafka-0 pod crash-looped with exit code 1 immediately after "Configuring...", with the log line "port is deprecated. Please use KAFKA_ADVERTISED_LISTENERS instead." No further output, no stack trace.
 
-Analytical query-engine verification: complete via DuckDB, not Snowflake. Snowflake integration remains a possible future addition if trial signup issues resolve, but is no longer a blocker for the project's completeness, the architectural point (Iceberg's cross-engine portability) is already proven.
+**Root cause:** Kubernetes automatically injects environment variables into every pod for each Service in the same namespace, using a legacy Docker-links naming convention. A Service literally named "kafka" caused Kubernetes to auto-generate a variable named KAFKA_PORT. Confluent's own container entrypoint script has a hardcoded check that treats any KAFKA_PORT variable as a sign of old-style deprecated configuration and immediately exits, even though this variable was never set manually. This is a known, documented interaction bug between Kubernetes auto-injection and Confluent's cp-kafka image, unrelated to the actual manifest content.
 
-Remaining roadmap items: Kubernetes orchestration, Snowflake integration (optional/blocked), Terraform infrastructure-as-code.
+**Fix:** Renamed the Kubernetes Service from "kafka" to two separately-named services (kafka-headless for internal StatefulSet DNS, kafka-external for NodePort access) so Kubernetes never generates a variable named exactly KAFKA_PORT.
+
+**Lesson:** Kubernetes automatic env-var injection for Services is easy to forget about and can silently collide with application-level environment variable conventions. Worth checking a container's own environment variable expectations against what Kubernetes might auto-generate before naming Services.
+
+---
+
+## 10. Kind clusters do not expose NodePorts to the host by default
+
+**Symptom:** Kafka pod running and healthy inside the cluster, but connecting from a Windows-side Python client to localhost on the NodePort failed with connection-refused on both IPv4 and IPv6.
+
+**Root cause:** Unlike Minikube or cloud-managed Kubernetes, a kind cluster runs its entire "node" inside a single Docker container. NodePorts are only exposed within that container's network by default, nothing automatically forwards them to the host machine.
+
+**Fix:** kind requires explicit extraPortMappings in the cluster config file, set at cluster-creation time (cannot be patched into a running cluster). This binds a specific container port to the same port on the host when the node container starts.
+
+**Lesson:** "The pod is Running and healthy" and "the service is reachable from outside the cluster" are two independent facts, verify both, especially with local Kubernetes tooling like kind where host networking behaves differently than cloud-managed clusters most tutorials assume.
+
+---
+
+## 11. Helm chart schema drift: guessing config field names from an old mental model fails silently
+
+**Symptom:** First values override used a webserver.service key expecting it to expose the UI via NodePort. The dry-run rendered successfully with no errors, but the actual Service manifest showed no NodePort configuration at all, the override was silently ignored.
+
+**Root cause:** Airflow 3.x's Helm chart renamed the "webserver" component to "apiServer" (matching Airflow 3's own architectural split into a separate API server process). Helm does not error on unrecognized keys in a values file by default, it silently ignores them.
+
+**Fix:** Searched the actual default-values.yaml (pulled fresh via helm show values) for the real field structure, found the correct apiServer.service.type / apiServer.service.ports path, and re-verified via a second dry-run that the rendered manifest actually contained the NodePort configuration.
+
+**Lesson:** Helm's silent-ignore behavior for unknown keys means a successful dry-run is not proof every override took effect, only that the YAML was syntactically valid. Always verify specific values actually appear in the rendered output.
+
+---
+
+## 12. Helm chart automated create-user Job did not produce a working login
+
+**Symptom:** Airflow UI loaded via the NodePort, but the documented default credentials (admin/admin) returned "invalid login or password."
+
+**Root cause:** airflow users list inside the running scheduler pod showed zero users existed. The chart's create-user Job (a post-install hook) either failed silently or completed and was cleaned up by its 300-second TTL before being investigated.
+
+**Fix:** Ran airflow users create manually inside the scheduler pod via kubectl exec, using the same credentials the chart's Job was supposed to create automatically.
+
+**Lesson:** Helm chart post-install Jobs with short TTLs can complete, fail, or get cleaned up before you notice something is wrong. If documented default credentials do not work, check the actual application state directly rather than assuming the automated step succeeded.
+
+---
+
+## 13. Terraform and cloud account setup (AWS)
+
+**Decision:** Provisioned a real AWS S3 bucket via Terraform (versioning enabled, public access explicitly blocked) to serve as a genuine cloud-backed Iceberg warehouse location, rather than using Terraform against only local Kubernetes resources. Terraform's actual value proposition is cloud infrastructure provisioning, and using it exclusively against local tooling would be a non-standard demonstration.
+
+**Practices followed:**
+- Created a dedicated IAM user (terraform-deploy) with a scoped S3-only policy rather than root credentials or broad AdministratorAccess, least-privilege from the start.
+- AWS credentials configured via the AWS CLI credentials file, never hardcoded into any .tf file or committed to git.
+- .terraform/ and *.tfstate / *.tfstate.backup explicitly excluded from version control; only main.tf and the provider lock file committed, matching Terraform's own guidance on source control versus remote state.
+
+**Lesson:** Real, minimal cloud infrastructure with correct security practices (scoped IAM, gitignored state, no hardcoded secrets) is a stronger demonstration of production-relevant skill than avoiding cloud entirely or over-provisioning beyond what the project needs.
+
+## Status: Project roadmap complete
+
+Every item from the original technical stack has a real, working, verified implementation: Kafka (with hand-rolled Kubernetes StatefulSets), Spark Structured Streaming, Apache Iceberg (Medallion architecture, Bronze/Silver/Gold), dbt Core, Docker, Kubernetes (both hand-rolled manifests and a production-pattern Helm deployment with live git-sync), and Terraform against real AWS infrastructure. Snowflake was substituted with DuckDB after a signup blocker (see #8); this remains the one deliberate substitution from the original plan, fully documented and defensible on its own technical merits.
