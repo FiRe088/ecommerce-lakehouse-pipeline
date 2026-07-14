@@ -185,6 +185,26 @@ This document is a running log of real problems hit while building the ecommerce
 
 **Lesson:** Real, minimal cloud infrastructure with correct security practices (scoped IAM, gitignored state, no hardcoded secrets) is a stronger demonstration of production-relevant skill than avoiding cloud entirely or over-provisioning beyond what the project needs.
 
-## Status: Project roadmap complete
+---
+
+## 14. Wiring S3 into the actual pipeline: classpath, namespace, and a recurring Zookeeper failure
+
+**Goal:** Move beyond an isolated S3-write test to having dbt genuinely read from and write to S3-backed Iceberg tables, closing the loop between "S3 access works" and "the pipeline uses it."
+
+**Sub-problem A: NoClassDefFoundError despite the JAR being present and complete.**
+Symptom: java.lang.NoClassDefFoundError: com/amazonaws/auth/AWSCredentialsProvider when writing to S3, even though jar tf confirmed the class genuinely existed inside the downloaded 280MB aws-java-sdk-bundle JAR. Root cause: spark.jars.packages resolves and downloads dependencies via Ivy correctly, but does not always reliably wire every resolved JAR onto the actual runtime classpath the JVM uses at execution time, a known category of Spark/Ivy quirk, not a corrupted download. Fix: explicitly added the JAR's cached path to spark.driver.extraClassPath and spark.executor.extraClassPath, forcing it onto the classpath directly rather than relying on spark.jars.packages alone.
+
+**Sub-problem B: NoSuchNamespaceException on a brand-new S3 warehouse.**
+Symptom: dbt failed immediately when targeting the S3 warehouse for the first time, since the bronze namespace had never been created there, every prior warehouse (Windows, then Linux) already had this namespace from earlier manual setup, masking the fact that namespace creation is not automatic. Fix: ran CREATE NAMESPACE IF NOT EXISTS spark_catalog.bronze once against the new warehouse before any dbt model could succeed.
+
+**Sub-problem C: dbt models read from Bronze, they do not create it.**
+Realization: stg_clickstream/stg_orders reference source('bronze', ...), tables populated by separate Spark ingestion scripts, not by dbt itself. Making the S3 target genuinely usable required rebuilding Bronze from Kafka a third time (after Windows and Linux-local), this time targeting the S3 warehouse path, reusing the exact same rebuild script pattern and malformed-message filter established in entry #7.
+
+**Sub-problem D: the exact same Zookeeper NodeExistsException recurred.**
+While reconnecting to Kafka for the S3 rebuild, discovered Kafka had crashed with exit code 1 due to NodeExistsException: KeeperErrorCode = NodeExists, the identical failure from earlier in this same session (see #6's Docker networking discovery), caused by a second ungraceful Docker Desktop restart (this one from a hung/killed terminal session, not a deliberate action) leaving a stale ephemeral broker registration in Zookeeper. Fix: identical to before, docker volume prune to clear the stale ephemeral state, then a clean restart. Recognizing this as the same documented failure mode meant it was resolved in under two minutes the second time, instead of the multi-step diagnosis it took originally.
+
+**Lesson:** Wiring a new storage backend into an existing pipeline surfaces a predictable sequence of gaps: classpath/dependency wiring, one-time environment setup (namespaces, buckets, permissions) that earlier environments had already silently accumulated, and a reminder that transformation tools (dbt) sit downstream of ingestion tools (Spark/Kafka consumers) and cannot substitute for them. Separately: keeping a clear "known failure, known fix" record (this very document) paid off directly within the same session, the second occurrence of the Zookeeper NodeExistsException was resolved almost immediately by recognizing the pattern rather than re-diagnosing from scratch.
+
+## Status: Full pipeline verified against real AWS S3
 
 Every item from the original technical stack has a real, working, verified implementation: Kafka (with hand-rolled Kubernetes StatefulSets), Spark Structured Streaming, Apache Iceberg (Medallion architecture, Bronze/Silver/Gold), dbt Core, Docker, Kubernetes (both hand-rolled manifests and a production-pattern Helm deployment with live git-sync), and Terraform against real AWS infrastructure. Snowflake was substituted with DuckDB after a signup blocker (see #8); this remains the one deliberate substitution from the original plan, fully documented and defensible on its own technical merits.
