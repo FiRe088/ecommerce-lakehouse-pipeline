@@ -1,0 +1,28 @@
+executor: CeleryExecutor
+
+postgresql:
+  enabled: true
+
+redis:
+  enabled: true
+
+apiServer:
+  service:
+    type: NodePort
+    ports:
+      - name: api-server
+        port: 8080
+        nodePort: 30080
+
+dags:
+  gitSync:
+    enabled: true
+    repo: https://github.com/FiRe088/ecommerce-lakehouse-pipeline.git
+    branch: master
+    subPath: "airflow/dags"
+    wait: 60
+
+images:
+  airflow:
+    repository: apache/airflow
+    tag: 3.3.0
